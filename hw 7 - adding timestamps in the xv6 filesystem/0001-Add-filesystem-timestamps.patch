@@ -1,0 +1,395 @@
+From e8b54aec4b55196830c2f0e46503cec91ffb08aa Mon Sep 17 00:00:00 2001
+From: Warlon Zeng <wz634@nyu.edu>
+Date: Tue, 19 Apr 2016 21:30:34 -0400
+Subject: [PATCH] Add filesystem timestamps
+
+---
+ file.h    |  9 +++++++++
+ fs.c      | 35 ++++++++++++++++++++++++++++-------
+ fs.h      | 21 ++++++++++++++++-----
+ ls.c      | 16 ++++++++--------
+ mkfs.c    | 13 +++++++++++++
+ stat.h    |  9 +++++++++
+ sysfile.c | 31 +++++++++++++++++++++++++++----
+ 7 files changed, 110 insertions(+), 24 deletions(-)
+
+diff --git a/file.h b/file.h
+index 5a4a463..8d6ba62 100644
+--- a/file.h
++++ b/file.h
+@@ -22,6 +22,15 @@ struct inode {
+   short nlink;
+   uint size;
+   uint addrs[NDIRECT+1];
++
++  // Create a new fields for time. Instead of sticking a struct here. Recreate all fields of rctdate
++  uint second;
++  uint minute;
++  uint hour;
++  uint day;
++  uint month;
++  uint year;
++
+ };
+ #define I_BUSY 0x1
+ #define I_VALID 0x2
+diff --git a/fs.c b/fs.c
+index 025b326..4bff192 100644
+--- a/fs.c
++++ b/fs.c
+@@ -5,7 +5,7 @@
+ //   + Directories: inode with special contents (list of other inodes!)
+ //   + Names: paths like /usr/rtm/xv6/fs.c for convenient naming.
+ //
+-// This file contains the low-level file system manipulation 
++// This file contains the low-level file system manipulation
+ // routines.  The (higher-level) system call implementations
+ // are in sysfile.c.
+ 
+@@ -19,6 +19,7 @@
+ #include "fs.h"
+ #include "buf.h"
+ #include "file.h"
++//#include "date.h"
+ 
+ #define min(a, b) ((a) < (b) ? (a) : (b))
+ static void itrunc(struct inode*);
+@@ -29,7 +30,7 @@ void
+ readsb(int dev, struct superblock *sb)
+ {
+   struct buf *bp;
+-  
++
+   bp = bread(dev, 1);
+   memmove(sb, bp->data, sizeof(*sb));
+   brelse(bp);
+@@ -40,14 +41,14 @@ static void
+ bzero(int dev, int bno)
+ {
+   struct buf *bp;
+-  
++
+   bp = bread(dev, bno);
+   memset(bp->data, 0, BSIZE);
+   log_write(bp);
+   brelse(bp);
+ }
+ 
+-// Blocks. 
++// Blocks.
+ 
+ // Allocate a zeroed disk block.
+ static uint
+@@ -209,6 +210,12 @@ iupdate(struct inode *ip)
+   dip->minor = ip->minor;
+   dip->nlink = ip->nlink;
+   dip->size = ip->size;
++    dip->second = ip->second;
++    dip->minute = ip->minute;
++    dip->hour = ip->hour;
++    dip->day = ip->day;
++    dip->month = ip->month;
++    dip->year = ip->year;
+   memmove(dip->addrs, ip->addrs, sizeof(ip->addrs));
+   log_write(bp);
+   brelse(bp);
+@@ -286,6 +293,12 @@ ilock(struct inode *ip)
+     ip->minor = dip->minor;
+     ip->nlink = dip->nlink;
+     ip->size = dip->size;
++    ip->second = dip->second;
++    ip->minute = dip->minute;
++    ip->hour = dip->hour;
++    ip->day = dip->day;
++    ip->month = dip->month;
++    ip->year = dip->year;
+     memmove(ip->addrs, dip->addrs, sizeof(ip->addrs));
+     brelse(bp);
+     ip->flags |= I_VALID;
+@@ -348,7 +361,7 @@ iunlockput(struct inode *ip)
+ //
+ // The content (data) associated with each inode is stored
+ // in blocks on the disk. The first NDIRECT block numbers
+-// are listed in ip->addrs[].  The next NINDIRECT blocks are 
++// are listed in ip->addrs[].  The next NINDIRECT blocks are
+ // listed in block ip->addrs[NDIRECT].
+ 
+ // Return the disk block address of the nth block in inode ip.
+@@ -401,7 +414,7 @@ itrunc(struct inode *ip)
+       ip->addrs[i] = 0;
+     }
+   }
+-  
++
+   if(ip->addrs[NDIRECT]){
+     bp = bread(ip->dev, ip->addrs[NDIRECT]);
+     a = (uint*)bp->data;
+@@ -427,6 +440,14 @@ stati(struct inode *ip, struct stat *st)
+   st->type = ip->type;
+   st->nlink = ip->nlink;
+   st->size = ip->size;
++
++// Added these fields to stat, so have to copy them over as well
++  st->second = ip->second;
++  st->minute = ip->minute;
++  st->hour = ip->hour;
++  st->day = ip->day;
++  st->month = ip->month;
++  st->year = ip->year;
+ }
+ 
+ //PAGEBREAK!
+@@ -554,7 +575,7 @@ dirlink(struct inode *dp, char *name, uint inum)
+   de.inum = inum;
+   if(writei(dp, (char*)&de, off, sizeof(de)) != sizeof(de))
+     panic("dirlink");
+-  
++
+   return 0;
+ }
+ 
+diff --git a/fs.h b/fs.h
+index e1d7d09..3567e9b 100644
+--- a/fs.h
++++ b/fs.h
+@@ -1,9 +1,13 @@
+-// On-disk file system format. 
++// On-disk file system format.
+ // Both the kernel and user programs use this header file.
+ 
+ 
+ #define ROOTINO 1  // root i-number
+ #define BSIZE 512  // block size
++//#include "date.h"
++
++// Changed BSIZE because struct of dinode size changed to 36 byes. 504 divides evenly into 36
++// #define BSIZE 540
+ 
+ // Disk layout:
+ // [ boot block | super block | log | inode blocks | free bit map | data blocks ]
+@@ -20,9 +24,9 @@ struct superblock {
+   uint bmapstart;    // Block number of first free map block
+ };
+ 
+-#define NDIRECT 12
+-#define NINDIRECT (BSIZE / sizeof(uint))
+-#define MAXFILE (NDIRECT + NINDIRECT)
++#define NDIRECT 22                          // Changed from 12
++#define NINDIRECT (BSIZE / sizeof(uint))    // 512/4 = 128
++#define MAXFILE (NDIRECT + NINDIRECT)       // MAXFILE = 140
+ 
+ // On-disk inode structure
+ struct dinode {
+@@ -32,6 +36,14 @@ struct dinode {
+   short nlink;          // Number of links to inode in file system
+   uint size;            // Size of file (bytes)
+   uint addrs[NDIRECT+1];   // Data block addresses
++
++  // Add datetime here. Instead of sticking the whole rtcdate obj here. Recreate the fieldss
++  uint second;
++  uint minute;
++  uint hour;
++  uint day;
++  uint month;
++  uint year;
+ };
+ 
+ // Inodes per block.
+@@ -53,4 +65,3 @@ struct dirent {
+   ushort inum;
+   char name[DIRSIZ];
+ };
+-
+diff --git a/ls.c b/ls.c
+index b6ddd7f..4d72860 100644
+--- a/ls.c
++++ b/ls.c
+@@ -8,12 +8,12 @@ fmtname(char *path)
+ {
+   static char buf[DIRSIZ+1];
+   char *p;
+-  
++
+   // Find first character after last slash.
+   for(p=path+strlen(path); p >= path && *p != '/'; p--)
+     ;
+   p++;
+-  
++
+   // Return blank-padded name.
+   if(strlen(p) >= DIRSIZ)
+     return p;
+@@ -29,23 +29,23 @@ ls(char *path)
+   int fd;
+   struct dirent de;
+   struct stat st;
+-  
++
+   if((fd = open(path, 0)) < 0){
+     printf(2, "ls: cannot open %s\n", path);
+     return;
+   }
+-  
++
+   if(fstat(fd, &st) < 0){
+     printf(2, "ls: cannot stat %s\n", path);
+     close(fd);
+     return;
+   }
+-  
++
+   switch(st.type){
+   case T_FILE:
+-    printf(1, "%s %d %d %d\n", fmtname(path), st.type, st.ino, st.size);
++    printf(1, "%s %d %d %d %d/%d/%d %d:%d:%d\n", fmtname(path), st.type, st.ino, st.size, st.day, st.month, st.year, st.hour, st.minute, st.second);
+     break;
+-  
++
+   case T_DIR:
+     if(strlen(path) + 1 + DIRSIZ + 1 > sizeof buf){
+       printf(1, "ls: path too long\n");
+@@ -63,7 +63,7 @@ ls(char *path)
+         printf(1, "ls: cannot stat %s\n", buf);
+         continue;
+       }
+-      printf(1, "%s %d %d %d\n", fmtname(buf), st.type, st.ino, st.size);
++      printf(1, "%s %d %d %d %d/%d/%d %d:%d:%d\n", fmtname(buf), st.type, st.ino, st.size, st.day, st.month, st.year, st.hour, st.minute, st.second);
+     }
+     break;
+   }
+diff --git a/mkfs.c b/mkfs.c
+index 0a10754..643bfbc 100644
+--- a/mkfs.c
++++ b/mkfs.c
+@@ -4,6 +4,7 @@
+ #include <string.h>
+ #include <fcntl.h>
+ #include <assert.h>
++#include <time.h>
+ 
+ #define stat xv6_stat  // avoid clash with host struct stat
+ #include "types.h"
+@@ -230,6 +231,18 @@ ialloc(ushort type)
+   din.type = xshort(type);
+   din.nlink = xshort(1);
+   din.size = xint(0);
++
++  time_t totalTime;
++  struct tm * date;
++  time(&totalTime);
++  date = gmtime(&totalTime);
++  din.second = date->tm_sec;
++  din.minute = date->tm_min;
++  din.hour = date->tm_hour;
++  din.day = date->tm_mday;
++  din.month = date->tm_mon;
++  din.year = date->tm_year;
++
+   winode(inum, &din);
+   return inum;
+ }
+diff --git a/stat.h b/stat.h
+index 8a80933..7bc04d6 100644
+--- a/stat.h
++++ b/stat.h
+@@ -1,6 +1,7 @@
+ #define T_DIR  1   // Directory
+ #define T_FILE 2   // File
+ #define T_DEV  3   // Device
++//#include "date.h"
+ 
+ struct stat {
+   short type;  // Type of file
+@@ -8,4 +9,12 @@ struct stat {
+   uint ino;    // Inode number
+   short nlink; // Number of links to file
+   uint size;   // Size of file in bytes
++
++// Added these in because inode has them too.
++  uint second;
++  uint minute;
++  uint hour;
++  uint day;
++  uint month;
++  uint year;
+ };
+diff --git a/sysfile.c b/sysfile.c
+index 2209f6e..5910c63 100644
+--- a/sysfile.c
++++ b/sysfile.c
+@@ -14,6 +14,10 @@
+ #include "file.h"
+ #include "fcntl.h"
+ 
++// Necessary to use cmostime function
++#include "date.h"
++//#include "lapic.c"
++
+ // Fetch the nth word-sized system call argument as a file descriptor
+ // and return both the descriptor and the corresponding struct file.
+ static int
+@@ -54,7 +58,7 @@ sys_dup(void)
+ {
+   struct file *f;
+   int fd;
+-  
++
+   if(argfd(0, 0, &f) < 0)
+     return -1;
+   if((fd=fdalloc(f)) < 0)
+@@ -92,7 +96,7 @@ sys_close(void)
+ {
+   int fd;
+   struct file *f;
+-  
++
+   if(argfd(0, &fd, &f) < 0)
+     return -1;
+   proc->ofile[fd] = 0;
+@@ -105,7 +109,7 @@ sys_fstat(void)
+ {
+   struct file *f;
+   struct stat *st;
+-  
++
+   if(argfd(0, 0, &f) < 0 || argptr(1, (void*)&st, sizeof(*st)) < 0)
+     return -1;
+   return filestat(f, st);
+@@ -262,6 +266,25 @@ create(char *path, short type, short major, short minor)
+   ip->major = major;
+   ip->minor = minor;
+   ip->nlink = 1;
++
++  // put time here?
++  struct rtcdate r;
++
++  r.second = 0;
++  r.minute = 0;
++  r.hour = 0;
++  r.day = 0;
++  r.month = 0;
++  r.year = 0;
++
++  cmostime(&r);
++  ip->second = r.second;
++  ip->minute = r.minute;
++  ip->hour = r.hour;
++  ip->day = r.day;
++  ip->month = r.month;
++  ip->year = r.year;
++
+   iupdate(ip);
+ 
+   if(type == T_DIR){  // Create . and .. entries.
+@@ -353,7 +376,7 @@ sys_mknod(void)
+   char *path;
+   int len;
+   int major, minor;
+-  
++
+   begin_op();
+   if((len=argstr(0, &path)) < 0 ||
+      argint(1, &major) < 0 ||
+-- 
+1.9.1
+
