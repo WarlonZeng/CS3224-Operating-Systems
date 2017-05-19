@@ -1,0 +1,13 @@
+Warlon Zeng, N11183332
+Bonus HW - Overflow password buffer hacking
+5/4/16
+
+An example of a password that can crack into the xv6 OS is "0000000000000000000000000000000000000000000000000000000000000000", a
+string array consisting of 65 characters. Looking into the code, the code "char pass[64] = {0};" clearly indicates that the length of the 
+array is 64 characters. However, this does not enforce the user to type up to 64 characters; it merely states that the array for the
+password uses 64 characters. This means that if a password of over 64 characters is used, the buffer will be overflowed due to 
+gets(var, len) poor security, and the overflow will go to the next block of memory which is is_valid. The overflow will flip the bits in 
+is_valid memory address, causing the program to recognize is_valid as true (>0 is recognized as true). This also means that there is a
+limit to how many characters we can use for input password. Too many characters will not only overflow the block of memory the password
+is stored in, but also the block of memory of the value is_valid. Overflowing is_valid overflows into printf function, which causes a panic.
+So, to get any good input to crack the system, any input for x in 64 < x < 80 will crack the password security.
